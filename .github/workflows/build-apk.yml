@@ -49,11 +49,15 @@ jobs:
 
       - name: Configure Android 17 and Native 16 KB Alignment
         run: |
-          # Enforce legacy packaging so Android 15/16/17 extracts .so libraries to disk with proper page alignment
-          echo "expo.useLegacyPackaging=true" >> android/gradle.properties
+          # Ensure clean newline before appending properties to avoid corrupting expo.inlineModules.watchedDirectories
+          printf "\nexpo.useLegacyPackaging=true\n" >> android/gradle.properties
           sed -i 's/reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64/' android/gradle.properties
           # Ensure extractNativeLibs="true" is set on the Application tag
-          sed -i 's/<application /<application android:extractNativeLibs="true" /g' android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'android:extractNativeLibs' android/app/src/main/AndroidManifest.xml; then
+            sed -i 's/<application /<application android:extractNativeLibs="true" /g' android/app/src/main/AndroidManifest.xml
+          fi
+          echo "=== Tail of android/gradle.properties ==="
+          tail -n 10 android/gradle.properties
 
       - name: Ensure Debug Keystore Exists
         run: |
