@@ -37,6 +37,11 @@ class AudioService {
   private activeQueue: Track[] = [];
   private currentIndex = -1;
 
+  // Non-repeating Shuffle Cycle Tracking
+  private shuffleCycleOrder: string[] = [];
+  private playedInCycle: Set<string> = new Set();
+  private historyStack: Track[] = [];
+
   private listeners: Set<PlaybackListener> = new Set();
   private isAudioModeConfigured = false;
   private statusSubscription: any = null;
@@ -90,14 +95,8 @@ class AudioService {
   setQueue(tracks: Track[], startIndex = 0, autoPlay = true): Promise<void> {
     this.originalQueue = [...tracks];
     if (this.isShuffle) {
-      this.activeQueue = this.shuffleArray([...tracks]);
       const selected = tracks[startIndex];
-      if (selected) {
-        const newIndex = this.activeQueue.findIndex((t) => t.id === selected.id);
-        this.currentIndex = newIndex >= 0 ? newIndex : 0;
-      } else {
-        this.currentIndex = 0;
-      }
+      this.initShuffleCycle(selected?.id);
     } else {
       this.activeQueue = [...tracks];
       this.currentIndex = startIndex;
@@ -107,6 +106,104 @@ class AudioService {
       return this.loadAndPlay(this.activeQueue[this.currentIndex], autoPlay);
     }
     return Promise.resolve();
+  }
+
+  /**
+   * Initializes or refreshes a randomized shuffle cycle where each track
+   * is guaranteed to play exactly once before any song repeats.
+   */
+  private initShuffleCycle(preserveTrackId?: string): void {
+    if (this.originalQueue.length === 0) {
+      this.shuffleCycleOrder = [];
+      this.playedInCycle.clear();
+      this.activeQueue = [];
+      this.currentIndex = -1;
+      return;
+    }
+
+    const allIds = this.originalQueue.map((t) => t.id);
+    const shuffledIds = this.shuffleArray(allIds);
+
+    if (preserveTrackId) {
+      const idx = shuffledIds.indexOf(preserveTrackId);
+      if (idx > -1) {
+        shuffledIds.splice(idx, 1);
+        shuffledIds.unshift(preserveTrackId);
+      }
+      this.playedInCycle = new Set([preserveTrackId]);
+    } else {
+      this.playedInCycle = new Set();
+    }
+
+    this.shuffleCycleOrder = shuffledIds;
+    const trackMap = new Map(this.originalQueue.map((t) => [t.id, t]));
+    this.activeQueue = this.shuffleCycleOrder
+      .map((id) => trackMap.get(id))
+      .filter((t): t is Track => !!t);
+
+    this.currentIndex = 0;
+  }
+
+  /**
+   * Synchronizes active playback queue and shuffle cycles when tracks
+   * are imported, added, or deleted from the library.
+   */
+  syncLibraryTracks(allTracks: Track[]): void {
+    const newTrackMap = new Map(allTracks.map((t) => [t.id, t]));
+
+    // 1. Clean up deleted tracks
+    this.originalQueue = this.originalQueue.filter((t) => newTrackMap.has(t.id));
+    this.activeQueue = this.activeQueue.filter((t) => newTrackMap.has(t.id));
+    this.shuffleCycleOrder = this.shuffleCycleOrder.filter((id) => newTrackMap.has(id));
+
+    for (const id of this.playedInCycle) {
+      if (!newTrackMap.has(id)) {
+        this.playedInCycle.delete(id);
+      }
+    }
+
+    // 2. Incorporate newly added tracks
+    const currentIds = new Set(this.originalQueue.map((t) => t.id));
+    const addedTracks = allTracks.filter((t) => !currentIds.has(t.id));
+
+    if (addedTracks.length > 0) {
+      this.originalQueue.push(...addedTracks);
+
+      if (this.isShuffle) {
+        // Distribute added track IDs randomly into unplayed remaining slice
+        for (const track of addedTracks) {
+          const insertPos = Math.floor(Math.random() * (this.shuffleCycleOrder.length + 1));
+          this.shuffleCycleOrder.splice(insertPos, 0, track.id);
+        }
+        const fullMap = new Map(this.originalQueue.map((t) => [t.id, t]));
+        this.activeQueue = this.shuffleCycleOrder
+          .map((id) => fullMap.get(id))
+          .filter((t): t is Track => !!t);
+      } else {
+        this.activeQueue.push(...addedTracks);
+      }
+    }
+
+    // 3. Handle deletion of current playing track
+    if (this.currentTrack && !newTrackMap.has(this.currentTrack.id)) {
+      if (this.activeQueue.length > 0) {
+        this.next();
+      } else {
+        this.currentTrack = null;
+        this.isPlaying = false;
+        if (this.player) {
+          try {
+            this.player.pause();
+            this.player.release();
+          } catch {
+            // ignore
+          }
+          this.player = null;
+        }
+      }
+    }
+
+    this.notify();
   }
 
   async loadAndPlay(track: Track, shouldPlay = true): Promise<void> {
@@ -204,7 +301,9 @@ class AudioService {
       return;
     }
 
-    if (this.currentIndex < this.activeQueue.length - 1) {
+    if (this.isShuffle) {
+      await this.nextShuffleTrack();
+    } else if (this.currentIndex < this.activeQueue.length - 1) {
       await this.next();
     } else if (this.repeatMode === 'all' && this.activeQueue.length > 0) {
       this.currentIndex = 0;
@@ -247,6 +346,11 @@ class AudioService {
   async next(): Promise<void> {
     if (this.activeQueue.length === 0) return;
 
+    if (this.isShuffle) {
+      await this.nextShuffleTrack();
+      return;
+    }
+
     let nextIndex = this.currentIndex + 1;
     if (nextIndex >= this.activeQueue.length) {
       if (this.repeatMode === 'all') {
@@ -260,6 +364,49 @@ class AudioService {
     await this.loadAndPlay(this.activeQueue[nextIndex], true);
   }
 
+  private async nextShuffleTrack(): Promise<void> {
+    if (this.originalQueue.length === 0) return;
+
+    // Filter unplayed track IDs in current shuffle cycle
+    let unplayedIds = this.shuffleCycleOrder.filter((id) => !this.playedInCycle.has(id));
+
+    // If all songs in current cycle have been played without repeat, start a new cycle!
+    if (unplayedIds.length === 0) {
+      const lastId = this.currentTrack?.id;
+      this.initShuffleCycle();
+
+      // Ensure that if library has > 1 track, first track of new cycle doesn't duplicate last played track
+      if (this.originalQueue.length > 1 && this.shuffleCycleOrder[0] === lastId) {
+        const swapIdx = Math.floor(Math.random() * (this.shuffleCycleOrder.length - 1)) + 1;
+        [this.shuffleCycleOrder[0], this.shuffleCycleOrder[swapIdx]] = [
+          this.shuffleCycleOrder[swapIdx],
+          this.shuffleCycleOrder[0],
+        ];
+        const trackMap = new Map(this.originalQueue.map((t) => [t.id, t]));
+        this.activeQueue = this.shuffleCycleOrder
+          .map((id) => trackMap.get(id))
+          .filter((t): t is Track => !!t);
+      }
+
+      unplayedIds = this.shuffleCycleOrder.filter((id) => !this.playedInCycle.has(id));
+    }
+
+    const nextId = unplayedIds[0] || this.shuffleCycleOrder[0];
+    const trackMap = new Map(this.originalQueue.map((t) => [t.id, t]));
+    const nextTrack = trackMap.get(nextId);
+
+    if (nextTrack) {
+      if (this.currentTrack) {
+        this.historyStack.push(this.currentTrack);
+        if (this.historyStack.length > 50) this.historyStack.shift();
+      }
+      this.playedInCycle.add(nextTrack.id);
+      const newIdx = this.activeQueue.findIndex((t) => t.id === nextTrack.id);
+      this.currentIndex = newIdx >= 0 ? newIdx : 0;
+      await this.loadAndPlay(nextTrack, true);
+    }
+  }
+
   async previous(): Promise<void> {
     if (this.activeQueue.length === 0) return;
 
@@ -267,6 +414,16 @@ class AudioService {
     if (this.positionMillis > 3000 && this.player) {
       await this.seekTo(0);
       return;
+    }
+
+    if (this.isShuffle && this.historyStack.length > 0) {
+      const prevTrack = this.historyStack.pop();
+      if (prevTrack) {
+        const idx = this.activeQueue.findIndex((t) => t.id === prevTrack.id);
+        this.currentIndex = idx >= 0 ? idx : 0;
+        await this.loadAndPlay(prevTrack, true);
+        return;
+      }
     }
 
     let prevIndex = this.currentIndex - 1;
@@ -315,19 +472,17 @@ class AudioService {
     this.isShuffle = newShuffle;
 
     if (newShuffle) {
-      const cur = this.currentTrack;
-      this.activeQueue = this.shuffleArray([...this.originalQueue]);
-      if (cur) {
-        const newIdx = this.activeQueue.findIndex((t) => t.id === cur.id);
-        this.currentIndex = newIdx >= 0 ? newIdx : 0;
-      }
+      this.initShuffleCycle(this.currentTrack?.id);
     } else {
-      const cur = this.currentTrack;
+      // Revert to original linear ordering
       this.activeQueue = [...this.originalQueue];
-      if (cur) {
-        const newIdx = this.activeQueue.findIndex((t) => t.id === cur.id);
+      if (this.currentTrack) {
+        const newIdx = this.activeQueue.findIndex((t) => t.id === this.currentTrack!.id);
         this.currentIndex = newIdx >= 0 ? newIdx : 0;
       }
+      this.shuffleCycleOrder = [];
+      this.playedInCycle.clear();
+      this.historyStack = [];
     }
 
     this.notify();
@@ -349,7 +504,7 @@ class AudioService {
     this.notify();
   }
 
-  private shuffleArray(array: Track[]): Track[] {
+  private shuffleArray<T>(array: T[]): T[] {
     const arr = [...array];
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));

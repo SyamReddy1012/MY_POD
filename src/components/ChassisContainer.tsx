@@ -1,5 +1,13 @@
-import React, { useMemo } from 'react';
-import { View, StyleSheet, SafeAreaView, Dimensions, StatusBar } from 'react-native';
+import React, { useMemo, useEffect } from 'react';
+import {
+  View,
+  StyleSheet,
+  SafeAreaView,
+  StatusBar as RNStatusBar,
+  Platform,
+  useWindowDimensions,
+} from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMusicPlayer } from '../context/MusicPlayerContext';
 import { ClickWheel } from './ClickWheel';
@@ -9,8 +17,6 @@ import { SongListScreen } from '../screens/SongListScreen';
 import { GroupingListScreen } from '../screens/GroupingListScreen';
 import { PlaylistsScreen } from '../screens/PlaylistsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
-
-const { height, width } = Dimensions.get('window');
 
 export const ChassisContainer: React.FC = () => {
   const {
@@ -125,15 +131,25 @@ export const ChassisContainer: React.FC = () => {
     navigateTo,
   ]);
 
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const statusBarHeight = Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : 0;
+  const availableHeight = windowHeight - statusBarHeight;
+
+  // Responsive chassis bounding box
+  const chassisWidth = Math.min(windowWidth * 0.96, 420);
+  const chassisHeight = Math.min(availableHeight * 0.98, 860);
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle={theme.id === 'silver' ? 'dark-content' : 'light-content'} />
+    <SafeAreaView style={[styles.safeArea, { paddingTop: statusBarHeight }]}>
+      <StatusBar style={theme.id === 'silver' ? 'dark' : 'light'} />
 
       {/* Main Handheld Chassis */}
       <View
         style={[
           styles.chassisOuter,
           {
+            width: chassisWidth,
+            height: chassisHeight,
             borderColor: theme.chassisBorder,
           },
         ]}
@@ -186,8 +202,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chassisOuter: {
-    width: Math.min(width * 0.94, 430),
-    height: Math.min(height * 0.96, 840),
     borderRadius: 36,
     borderWidth: 2,
     overflow: 'hidden',
@@ -199,22 +213,21 @@ const styles = StyleSheet.create({
   },
   chassisGradient: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 10,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 8,
     justifyContent: 'space-between',
   },
   screenSection: {
-    flex: 1,
-    maxHeight: '52%',
-    minHeight: 280,
-    marginBottom: 8,
+    flex: 1.15,
+    marginBottom: 4,
+    overflow: 'hidden',
   },
   screenBezel: {
     flex: 1,
-    borderRadius: 20,
+    borderRadius: 18,
     borderWidth: 2.5,
-    padding: 6,
+    padding: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
@@ -223,12 +236,13 @@ const styles = StyleSheet.create({
   },
   screenGlass: {
     flex: 1,
-    borderRadius: 14,
+    borderRadius: 13,
     overflow: 'hidden',
   },
   wheelSection: {
+    flex: 0.85,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
+    paddingVertical: 2,
   },
 });

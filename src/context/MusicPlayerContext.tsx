@@ -111,6 +111,9 @@ export const MusicPlayerProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setFavorites(favs);
       setRecentlyPlayed(rec);
       setPlaylists(pls);
+
+      // Synchronize audio queue and shuffle cycles with current library state
+      audioService.syncLibraryTracks(all);
     } catch (e) {
       console.error('Error refreshing library:', e);
     } finally {
@@ -217,15 +220,11 @@ export const MusicPlayerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     centerActionRef.current = action;
   }, []);
 
-  // Wheel center press
+  // Wheel center press: dedicated Play/Pause
   const wheelPressCenter = useCallback(() => {
     if (settings.wheelHaptics) triggerButtonPressHaptic();
-    if (centerActionRef.current) {
-      centerActionRef.current();
-    } else if (currentScreen === 'now_playing') {
-      audioService.togglePlayPause();
-    }
-  }, [currentScreen, settings.wheelHaptics]);
+    audioService.togglePlayPause();
+  }, [settings.wheelHaptics]);
 
   // Playback helpers
   const playTrack = useCallback(

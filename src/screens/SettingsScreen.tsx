@@ -63,6 +63,25 @@ export const SettingsScreen: React.FC = () => {
       <HeaderBar title="Settings" />
 
       <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
+        {/* Section: Appearance & Dark Mode Toggle */}
+        <Text style={[styles.sectionHeader, { color: theme.screenSubtext }]}>APPEARANCE</Text>
+        <View style={[styles.sectionBox, { backgroundColor: theme.screenHeaderBg, borderColor: theme.screenGlassBorder }]}>
+          <View style={styles.rowItem}>
+            <View style={{ flex: 1, paddingRight: 8 }}>
+              <Text style={[styles.rowLabel, { color: theme.screenText }]}>Dark Mode</Text>
+              <Text style={[styles.rowSublabel, { color: theme.screenSubtext }]}>
+                {settings.theme === 'silver' ? 'Light Theme Active' : 'Dark Theme Active'}
+              </Text>
+            </View>
+            <Switch
+              value={settings.theme !== 'silver'}
+              onValueChange={(val) => setThemeId(val ? 'graphite' : 'silver')}
+              trackColor={{ false: '#94A3B8', true: theme.accent }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+        </View>
+
         {/* Section: Themes */}
         <Text style={[styles.sectionHeader, { color: theme.screenSubtext }]}>THEME & CASING</Text>
         <View style={[styles.sectionBox, { backgroundColor: theme.screenHeaderBg, borderColor: theme.screenGlassBorder }]}>

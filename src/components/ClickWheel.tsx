@@ -6,17 +6,13 @@ import {
   PanResponder,
   GestureResponderEvent,
   PanResponderGestureState,
-  Dimensions,
+  useWindowDimensions,
   TouchableOpacity,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useMusicPlayer } from '../context/MusicPlayerContext';
-
-const { width } = Dimensions.get('window');
-// Calculate an ergonomic wheel diameter based on screen width
-const WHEEL_SIZE = Math.min(width * 0.72, 280);
-const CENTER_BUTTON_SIZE = WHEEL_SIZE * 0.38;
+import { triggerButtonPressHaptic } from '../utils/haptics';
 
 interface ClickWheelProps {
   onMenuPress?: () => void;
@@ -42,7 +38,16 @@ export const ClickWheel: React.FC<ClickWheelProps> = ({
     nextTrack,
     prevTrack,
     settings,
+    playbackState,
   } = useMusicPlayer();
+
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+
+  // Dynamic responsive wheel sizing based on viewport to prevent screen overflow
+  const WHEEL_SIZE = useMemo(() => {
+    return Math.min(windowWidth * 0.68, windowHeight * 0.32, 260);
+  }, [windowWidth, windowHeight]);
+  const CENTER_BUTTON_SIZE = WHEEL_SIZE * 0.38;
 
   const [activeZone, setActiveZone] = useState<string | null>(null);
 
@@ -70,7 +75,15 @@ export const ClickWheel: React.FC<ClickWheelProps> = ({
   const centerRadius = CENTER_BUTTON_SIZE / 2;
 
   const handleMenu = onMenuPress || goBack;
-  const handleCenter = onCenterPress || wheelPressCenter;
+  // Center button is dedicated Play/Pause
+  const handleCenter = () => {
+    if (settings.wheelHaptics) triggerButtonPressHaptic();
+    if (onCenterPress) {
+      onCenterPress();
+    } else {
+      togglePlayPause();
+    }
+  };
   const handlePlayPause = onPlayPausePress || togglePlayPause;
   const handlePrev = onPrevPress || prevTrack;
   const handleNext = onNextPress || nextTrack;
@@ -265,7 +278,7 @@ export const ClickWheel: React.FC<ClickWheelProps> = ({
             <Ionicons name="play-forward-outline" size={18} color={theme.wheelTextColor} />
           </View>
 
-          {/* Center Button */}
+          {/* Center Button: Dedicated Play/Pause with Dynamic Icon */}
           <View
             style={[
               styles.centerButton,
@@ -284,17 +297,12 @@ export const ClickWheel: React.FC<ClickWheelProps> = ({
               end={{ x: 0.8, y: 0.9 }}
               style={styles.centerGradient}
             >
-              {/* Subtle inner tactile ring */}
-              <View
-                style={[
-                  styles.innerCenterRing,
-                  {
-                    width: CENTER_BUTTON_SIZE * 0.75,
-                    height: CENTER_BUTTON_SIZE * 0.75,
-                    borderRadius: (CENTER_BUTTON_SIZE * 0.75) / 2,
-                    borderColor: theme.wheelCenterBorder + '40',
-                  },
-                ]}
+              {/* Dynamic Play / Pause Icon */}
+              <Ionicons
+                name={playbackState.isPlaying ? 'pause' : 'play'}
+                size={Math.max(16, Math.round(CENTER_BUTTON_SIZE * 0.36))}
+                color={theme.wheelTextColor}
+                style={{ marginLeft: playbackState.isPlaying ? 0 : 2 }}
               />
             </LinearGradient>
           </View>

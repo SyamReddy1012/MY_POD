@@ -257,6 +257,8 @@ const styles = StyleSheet.create({
   itemTitle: {
     fontSize: 13,
     fontWeight: '700',
+    flex: 1,
+    marginRight: 8,
   },
   rightRow: {
     flexDirection: 'row',

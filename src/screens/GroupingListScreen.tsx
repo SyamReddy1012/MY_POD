@@ -83,10 +83,11 @@ export const GroupingListScreen: React.FC<GroupingListScreenProps> = ({
                         color={theme.screenHighlightText}
                         style={styles.iconMargin}
                       />
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text
                           style={[styles.itemTitle, { color: theme.screenHighlightText }]}
                           numberOfLines={1}
+                          ellipsizeMode="tail"
                         >
                           {item.name}
                         </Text>
@@ -97,6 +98,7 @@ export const GroupingListScreen: React.FC<GroupingListScreenProps> = ({
                               { color: theme.screenHighlightText + 'CC' },
                             ]}
                             numberOfLines={1}
+                            ellipsizeMode="tail"
                           >
                             {item.subtext}
                           </Text>
@@ -122,14 +124,19 @@ export const GroupingListScreen: React.FC<GroupingListScreenProps> = ({
                         color={theme.screenSubtext}
                         style={styles.iconMargin}
                       />
-                      <View>
-                        <Text style={[styles.itemTitle, { color: theme.screenText }]} numberOfLines={1}>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[styles.itemTitle, { color: theme.screenText }]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
                           {item.name}
                         </Text>
                         {item.subtext && (
                           <Text
                             style={[styles.itemSubtext, { color: theme.screenSubtext }]}
                             numberOfLines={1}
+                            ellipsizeMode="tail"
                           >
                             {item.subtext}
                           </Text>

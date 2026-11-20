@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useMusicPlayer } from '../context/MusicPlayerContext';
 import { HeaderBar } from '../components/HeaderBar';
@@ -15,6 +15,10 @@ export const NowPlayingScreen: React.FC = () => {
     cycleRepeat,
     navigateTo,
   } = useMusicPlayer();
+
+  const { height: windowHeight } = useWindowDimensions();
+  // Responsive artwork sizing to fit small screens without vertical clipping
+  const artworkSize = Math.max(100, Math.min(windowHeight * 0.16, 140));
 
   const { currentTrack, isShuffle, repeatMode, volume } = playbackState;
 
@@ -46,7 +50,7 @@ export const NowPlayingScreen: React.FC = () => {
 
       <View style={styles.content}>
         {/* Album Artwork / Vinyl */}
-        <ArtworkCover artworkUri={currentTrack.artworkUri} size={150} />
+        <ArtworkCover artworkUri={currentTrack.artworkUri} size={artworkSize} />
 
         {/* Track Details */}
         <View style={styles.trackDetails}>
