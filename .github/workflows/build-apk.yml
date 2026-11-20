@@ -47,6 +47,14 @@ jobs:
       - name: Generate Android Native Project
         run: npx expo prebuild --platform android --no-install
 
+      - name: Configure Android 17 and Native 16 KB Alignment
+        run: |
+          # Enforce legacy packaging so Android 15/16/17 extracts .so libraries to disk with proper page alignment
+          echo "expo.useLegacyPackaging=true" >> android/gradle.properties
+          sed -i 's/reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64/' android/gradle.properties
+          # Ensure extractNativeLibs="true" is set on the Application tag
+          sed -i 's/<application /<application android:extractNativeLibs="true" /g' android/app/src/main/AndroidManifest.xml
+
       - name: Ensure Debug Keystore Exists
         run: |
           if [ ! -f android/app/debug.keystore ]; then
@@ -66,7 +74,8 @@ jobs:
             --no-daemon \
             --console=plain \
             --stacktrace \
-            -PreactNativeArchitectures=arm64-v8a,armeabi-v7a \
+            -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64 \
+            -Pexpo.useLegacyPackaging=true \
             -Pandroid.enableMinifyInReleaseBuilds=false \
             -Pandroid.enableShrinkResourcesInReleaseBuilds=false \
             -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m"

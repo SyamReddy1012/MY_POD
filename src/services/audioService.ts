@@ -1,4 +1,9 @@
-import { Audio, AVPlaybackStatus, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import {
+  createAudioPlayer,
+  setAudioModeAsync,
+  AudioPlayer,
+  AudioStatus,
+} from 'expo-audio';
 import { Track, RepeatMode } from '../types';
 import { databaseService } from './databaseService';
 
@@ -18,7 +23,7 @@ export interface PlaybackState {
 type PlaybackListener = (state: PlaybackState) => void;
 
 class AudioService {
-  private sound: Audio.Sound | null = null;
+  private player: AudioPlayer | null = null;
   private currentTrack: Track | null = null;
   private isPlaying = false;
   private isBuffering = false;
@@ -34,17 +39,15 @@ class AudioService {
 
   private listeners: Set<PlaybackListener> = new Set();
   private isAudioModeConfigured = false;
+  private statusSubscription: any = null;
 
   async initAudioMode(): Promise<void> {
     if (this.isAudioModeConfigured) return;
     try {
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-        interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionMode: 'duckOthers',
       });
       this.isAudioModeConfigured = true;
     } catch (err) {
@@ -88,7 +91,6 @@ class AudioService {
     this.originalQueue = [...tracks];
     if (this.isShuffle) {
       this.activeQueue = this.shuffleArray([...tracks]);
-      // Keep selected track at current position if possible
       const selected = tracks[startIndex];
       if (selected) {
         const newIndex = this.activeQueue.findIndex((t) => t.id === selected.id);
@@ -111,10 +113,18 @@ class AudioService {
     await this.initAudioMode();
 
     try {
-      if (this.sound) {
-        await this.sound.stopAsync().catch(() => {});
-        await this.sound.unloadAsync().catch(() => {});
-        this.sound = null;
+      if (this.statusSubscription) {
+        this.statusSubscription.remove();
+        this.statusSubscription = null;
+      }
+      if (this.player) {
+        try {
+          this.player.pause();
+          this.player.release();
+        } catch {
+          // ignore cleanup error
+        }
+        this.player = null;
       }
 
       this.currentTrack = track;
@@ -124,17 +134,35 @@ class AudioService {
       this.isBuffering = true;
       this.notify();
 
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: track.uri },
-        {
-          shouldPlay,
-          volume: this.volume,
-          progressUpdateIntervalMillis: 300,
-        },
-        this.onPlaybackStatusUpdate
-      );
+      // Create new Expo Audio player
+      const player = createAudioPlayer({ uri: track.uri }, { updateInterval: 250 });
+      this.player = player;
+      player.volume = this.volume;
+      player.loop = this.repeatMode === 'one';
 
-      this.sound = sound;
+      // Set lock screen info if supported
+      try {
+        if ((player as any).setActiveForLockScreen) {
+          (player as any).setActiveForLockScreen(true, {
+            title: track.title,
+            artist: track.artist,
+            albumTitle: track.album,
+          });
+        }
+      } catch {
+        // Lock screen metadata optional
+      }
+
+      // Subscribe to player events
+      this.statusSubscription = player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+        this.onPlaybackStatusUpdate(status);
+      });
+
+      if (shouldPlay) {
+        player.play();
+        this.isPlaying = true;
+      }
+
       this.isBuffering = false;
 
       // Record play count and last played in DB
@@ -142,28 +170,27 @@ class AudioService {
 
       this.notify();
     } catch (err) {
-      console.error('Error loading audio track:', err);
+      console.error('Error loading audio track with expo-audio:', err);
       this.isPlaying = false;
       this.isBuffering = false;
       this.notify();
     }
   }
 
-  private onPlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      if (status.error) {
-        console.warn('Playback status error:', status.error);
-      }
-      return;
+  private onPlaybackStatusUpdate = (status: AudioStatus) => {
+    this.isPlaying = status.playing;
+    this.isBuffering = status.isBuffering || false;
+    
+    // Status timestamps are in seconds in expo-audio
+    if (typeof status.currentTime === 'number') {
+      this.positionMillis = Math.round(status.currentTime * 1000);
+    }
+    if (typeof status.duration === 'number' && status.duration > 0) {
+      this.durationMillis = Math.round(status.duration * 1000);
     }
 
-    this.isPlaying = status.isPlaying;
-    this.isBuffering = status.isBuffering;
-    this.positionMillis = status.positionMillis;
-    this.durationMillis = status.durationMillis || this.durationMillis;
-
     // Track finished
-    if (status.didJustFinish && !status.isLooping) {
+    if (status.didJustFinish) {
       this.handleTrackEnded();
     }
 
@@ -171,10 +198,9 @@ class AudioService {
   };
 
   private async handleTrackEnded() {
-    if (this.repeatMode === 'one' && this.currentTrack) {
-      if (this.sound) {
-        await this.sound.replayAsync();
-      }
+    if (this.repeatMode === 'one' && this.currentTrack && this.player) {
+      this.player.seekTo(0);
+      this.player.play();
       return;
     }
 
@@ -191,8 +217,8 @@ class AudioService {
   }
 
   async play(): Promise<void> {
-    if (this.sound) {
-      await this.sound.playAsync();
+    if (this.player) {
+      this.player.play();
       this.isPlaying = true;
       this.notify();
     } else if (this.currentTrack) {
@@ -203,8 +229,8 @@ class AudioService {
   }
 
   async pause(): Promise<void> {
-    if (this.sound) {
-      await this.sound.pauseAsync();
+    if (this.player) {
+      this.player.pause();
       this.isPlaying = false;
       this.notify();
     }
@@ -238,7 +264,7 @@ class AudioService {
     if (this.activeQueue.length === 0) return;
 
     // If played more than 3 seconds, restart current track
-    if (this.positionMillis > 3000 && this.sound) {
+    if (this.positionMillis > 3000 && this.player) {
       await this.seekTo(0);
       return;
     }
@@ -257,9 +283,10 @@ class AudioService {
   }
 
   async seekTo(positionMillis: number): Promise<void> {
-    if (this.sound) {
+    if (this.player) {
       const clamped = Math.max(0, Math.min(positionMillis, this.durationMillis));
-      await this.sound.setPositionAsync(clamped);
+      // expo-audio takes seconds
+      this.player.seekTo(clamped / 1000);
       this.positionMillis = clamped;
       this.notify();
     }
@@ -273,8 +300,8 @@ class AudioService {
   async setVolume(vol: number): Promise<void> {
     const clamped = Math.max(0, Math.min(1, vol));
     this.volume = clamped;
-    if (this.sound) {
-      await this.sound.setVolumeAsync(clamped);
+    if (this.player) {
+      this.player.volume = clamped;
     }
     this.notify();
   }
@@ -314,6 +341,11 @@ class AudioService {
     } else {
       this.repeatMode = 'off';
     }
+
+    if (this.player) {
+      this.player.loop = this.repeatMode === 'one';
+    }
+
     this.notify();
   }
 

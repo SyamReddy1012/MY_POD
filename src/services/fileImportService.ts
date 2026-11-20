@@ -1,5 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
-import { Audio } from 'expo-av';
+import { createAudioPlayer } from 'expo-audio';
 import * as FileSystem from 'expo-file-system';
 import { Track } from '../types';
 import { cleanTrackTitle } from '../utils/formatters';
@@ -36,25 +36,19 @@ export const fileImportService = {
       const importedTracks: Track[] = [];
 
       for (const asset of result.assets) {
-        const { uri, name, size, mimeType } = asset;
+        const { uri, name, size } = asset;
         const { title, artist } = cleanTrackTitle(name);
 
-        // Derive format from name or mime
         const ext = name.split('.').pop()?.toLowerCase() || 'mp3';
         
-        let duration = 0;
+        let duration = 180000;
         try {
-          // Probe actual audio file duration using expo-av without starting playback
-          const { sound, status } = await Audio.Sound.createAsync(
-            { uri },
-            { shouldPlay: false }
-          );
-          if (status.isLoaded && status.durationMillis) {
-            duration = status.durationMillis;
+          const probePlayer = createAudioPlayer({ uri });
+          if (probePlayer.duration && probePlayer.duration > 0) {
+            duration = Math.round(probePlayer.duration * 1000);
           }
-          await sound.unloadAsync();
+          probePlayer.release();
         } catch {
-          // Fallback duration if probe failed
           duration = 180000;
         }
 
