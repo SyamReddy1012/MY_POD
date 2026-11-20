@@ -13,6 +13,7 @@ jobs:
   build-apk:
     name: Build Standalone Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -32,7 +33,11 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
+
+      - name: Setup Gradle Cache & Performance
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Verify Android SDK Environment
         run: |
@@ -56,7 +61,15 @@ jobs:
 
       - name: Build Standalone Release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon
+        run: |
+          ./gradlew assembleRelease \
+            --no-daemon \
+            --console=plain \
+            --stacktrace \
+            -PreactNativeArchitectures=arm64-v8a,armeabi-v7a \
+            -Pandroid.enableMinifyInReleaseBuilds=false \
+            -Pandroid.enableShrinkResourcesInReleaseBuilds=false \
+            -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m"
 
       - name: Stage APK for Distribution
         run: |
@@ -65,7 +78,7 @@ jobs:
           if [ -n "$APK_PATH" ]; then
             echo "Found generated APK at: $APK_PATH"
             cp "$APK_PATH" output/MY-POD.apk
-            ls -la output/MY-POD.apk
+            ls -lh output/MY-POD.apk
           else
             echo "ERROR: No APK found in build outputs!"
             exit 1
