@@ -1,0 +1,51 @@
+name: Build MY POD Android APK
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate Native Android Project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build Release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Rename and Stage APK
+        run: |
+          mkdir -p output
+          cp android/app/build/outputs/apk/release/app-release.apk output/MY-POD.apk
+
+      - name: Upload MY POD APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MY-POD-apk
+          path: output/MY-POD.apk
