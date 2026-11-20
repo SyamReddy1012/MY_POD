@@ -3,17 +3,22 @@ name: Build MY POD Android APK
 on:
   push:
     branches: [ master, main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    name: Build Android APK
+  build-apk:
+    name: Build Standalone Android APK
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -29,26 +34,56 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Verify Android SDK Environment
+        run: |
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
 
-      - name: Generate Native Android Project
+      - name: Generate Android Native Project
         run: npx expo prebuild --platform android --no-install
+
+      - name: Ensure Debug Keystore Exists
+        run: |
+          if [ ! -f android/app/debug.keystore ]; then
+            echo "Generating debug keystore for signing..."
+            keytool -genkey -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          else
+            echo "Debug keystore already exists."
+          fi
 
       - name: Make Gradlew Executable
         run: chmod +x android/gradlew
 
-      - name: Build Release APK
+      - name: Build Standalone Release APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Rename and Stage APK
+      - name: Stage APK for Distribution
         run: |
           mkdir -p output
-          cp android/app/build/outputs/apk/release/app-release.apk output/MY-POD.apk
+          APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -n "$APK_PATH" ]; then
+            echo "Found generated APK at: $APK_PATH"
+            cp "$APK_PATH" output/MY-POD.apk
+            ls -la output/MY-POD.apk
+          else
+            echo "ERROR: No APK found in build outputs!"
+            exit 1
+          fi
 
-      - name: Upload MY POD APK Artifact
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: MY-POD-apk
           path: output/MY-POD.apk
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: output/MY-POD.apk
+          name: MY POD ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
