@@ -35,6 +35,9 @@ jobs:
       - name: Generate Native Android Project
         run: npx expo prebuild --platform android --no-install
 
+      - name: Make Gradlew Executable
+        run: chmod +x android/gradlew
+
       - name: Build Release APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon
